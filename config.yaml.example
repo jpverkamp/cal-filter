@@ -1,0 +1,56 @@
+# Example configuration for ics-filter.py
+# Copy to config.yaml and customize for your calendars.
+
+settings:
+  # Cache remote URLs for this many seconds before re-fetching.
+  url_refresh_seconds: 1800
+
+  # Include events from this many days in the past/future.
+  past_days: 14
+  future_days: 90
+
+outputs:
+  # Output calendars that will be written to disk.
+  - name: Work
+    path: ./output/work.ics
+  - name: Personal
+    path: ./output/personal.ics
+  - name: KidA
+    path: ./output/kid-a.ics
+
+# Optional shared rewrite rule using a YAML anchor.
+shared:
+  rewrite: &strip_prefix
+    name:
+      # Example: "A - Dentist" -> "Dentist"
+      pattern: "^[A-Z] - "
+      replace: ""
+
+inputs:
+  # Local file input.
+  - name: Work Source
+    path: ./ics/work.ics
+    rules:
+      - name: Exclude office-hours style events
+        exclude: true
+        match:
+          name: "(?i)(office hours|demo day)"
+    default:
+      output: Work
+
+  # Remote URL input (Google/CalDAV/etc).
+  - name: Family Source
+    url: "https://calendar.example.com/private/basic.ics"
+    rules:
+      - name: KidA Events
+        match:
+          name: "^A -"
+        rewrite: *strip_prefix
+        output: KidA
+      - name: Work-tagged Events
+        match:
+          name: "(?i)work"
+        output: Work
+    default:
+      # Anything not matched above goes here.
+      output: Personal
