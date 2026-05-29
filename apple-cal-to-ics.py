@@ -98,9 +98,12 @@ SELECT ci.*,
         l.address AS loc_address
 FROM CalendarItem ci
 LEFT JOIN Location l ON l.item_owner_id = ci.ROWID
+LEFT JOIN Participant p_self ON p_self.ROWID = ci.self_attendee_id
 WHERE ci.calendar_id = ?
     AND ci.entity_type != 1   -- skip tasks/reminders
     AND ci.hidden = 0
+    AND COALESCE(ci.invitation_status, 0) != 3  -- exclude declined
+    AND COALESCE(p_self.status, 0) != 3         -- exclude declined (self attendee)
 ORDER BY ci.start_date
 """,
     (args.calendar,),
