@@ -1,7 +1,8 @@
 import argparse
 import coloredlogs
 import datetime
-import ics
+import icalendar
+import recurring_ical_events
 import logging
 import markdownify
 import re
@@ -58,7 +59,7 @@ for output in config.get("outputs", []):
 
     outputs[name] = {
         "path": path,
-        "calendar": ics.Calendar(),
+        "calendar": icalendar.Calendar(),
     }
 
     logging.info(f"Initialized output: {name} -> {path}")
@@ -73,7 +74,7 @@ for input in config.get("inputs", []):
     if "path" in input:
         try:
             with open(input["path"], "r") as f:
-                calendar = ics.Calendar(f.read())
+                calendar = icalendar.Calendar.from_ical(f.read())
             logging.info(f"Loaded calendar from {input['path']}")
         except Exception as e:
             logging.error(f"Failed to read calendar from {input['path']}: {e}")
@@ -83,7 +84,7 @@ for input in config.get("inputs", []):
         try:
             response = requests.get(input["url"])
             response.raise_for_status()
-            calendar = ics.Calendar(response.text)
+            calendar = icalendar.Calendar.from_ical(response.text)
             logging.info(f"Fetched calendar from {input['url']}")
         except Exception as e:
             logging.error(f"Failed to fetch calendar from {input['url']}: {e}")
@@ -93,12 +94,24 @@ for input in config.get("inputs", []):
         logging.error(f"No valid source specified for input: {name}")
         continue
 
-    for event in calendar.events:
-        if event.end < start_time or event.begin > end_time:
-            # logging.debug(f"Event '{event.name}' is outside the date range, skipping")
-            continue
+    events = recurring_ical_events.of(calendar).between(start_time, end_time)
+    for event in events:
+        event_name = event.get("summary", "Unnamed Event")
+        event_start_time = event.get("dtstart").dt
+        event_end_time = event.get("dtend").dt
 
-        logging.debug(f"Evaluating event: {event.name} ({event.begin} - {event.end})")
+        try:
+            if event_end_time < start_time or event_start_time > end_time:
+                # logging.debug(f"Event '{event_name}' is outside the date range, skipping")
+                continue
+        except TypeError:
+            if event_end_time < start_time.date() or event_start_time > end_time.date():
+                # logging.debug(f"Event '{event_name}' is outside the date range, skipping")
+                continue
+
+        logging.debug(
+            f"Evaluating event: {event_name} ({event_start_time} - {event_end_time})"
+        )
 
         matched_rules = []
 
@@ -107,11 +120,11 @@ for input in config.get("inputs", []):
             matched = False
 
             for field, pattern in rule.get("match", {}).items():
-                field_value = getattr(event, field.lower(), "")
-                if re.search(pattern, str(field_value)):
+                field_value = event.get(field)
+                if field_value and re.search(pattern, str(field_value)):
                     matched = True
                     logging.debug(
-                        f"Event '{event.name}' matched rule '{rule_name}' on field '{field}' with pattern '{pattern}'"
+                        f"Event '{event_name}' matched rule '{rule_name}' on field '{field}' with pattern '{pattern}'"
                     )
                     break
 
@@ -119,7 +132,7 @@ for input in config.get("inputs", []):
                 matched_rules.append(rule)
 
         if not matched_rules and "default" in input:
-            logging.debug(f"No rules matched for event '{event.name}'")
+            logging.debug(f"No rules matched for event '{event_name}'")
             matched_rules = [input.get("default")]
 
         for matched_rule in matched_rules:
@@ -134,25 +147,25 @@ for input in config.get("inputs", []):
             rewrite = matched_rule.get("rewrite", {})
             for field, action in rewrite.items():
                 if "pattern" in action and "replace" in action:
-                    original_value = getattr(event, field.lower(), "")
+                    original_value = event.get(field, "")
                     new_value = re.sub(
                         action["pattern"], action["replace"], str(original_value)
                     )
-                    setattr(event, field.lower(), new_value)
+                    event[field] = new_value
                     logging.debug(
                         f"Rewrote event '{event.name}' field '{field}' from '{original_value}' to '{new_value}'"
                     )
 
             if config.get("settings", {}).get("html_to_markdown", False):
                 for field in ["description", "summary"]:
-                    original_value = getattr(event, field.lower(), "")
+                    original_value = event.get(field, "")
                     if original_value:
                         new_value = markdownify.markdownify(
                             str(original_value), heading_style="ATX"
                         )
-                        setattr(event, field.lower(), new_value)
+                        event[field] = new_value
                         logging.debug(
-                            f"Converted HTML to Markdown for event '{event.name}' field '{field}'"
+                            f"Converted HTML to Markdown for event '{event_name}' field '{field}'"
                         )
 
             output_names = matched_rule.get("output")
@@ -165,13 +178,13 @@ for input in config.get("inputs", []):
 
             for output_name in output_names:
                 if output_name in outputs:
-                    if event in outputs[output_name]["calendar"].events:
-                        continue
+                    # if event in outputs[output_name]["calendar"]:
+                    #     continue
 
-                    outputs[output_name]["calendar"].events.add(event)
+                    outputs[output_name]["calendar"].add_component(event)
 
                     logging.info(
-                        f"Added event '{event.name}' to output '{output_name}'"
+                        f"Added event '{event_name}' to output '{output_name}'"
                     )
                 else:
                     logging.warning(f"No valid output specified for rule '{rule_name}'")
