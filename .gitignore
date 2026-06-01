@@ -12,6 +12,7 @@ wheels/
 # Local configs/cache/data
 ics-filter.cache.sqlite
 config.yaml
+output/
 
 # Mac
 .DS_Store

@@ -190,9 +190,11 @@ for input in config.get("inputs", []):
                     logging.warning(f"No valid output specified for rule '{rule_name}'")
 
 for output_name, output_data in outputs.items():
+    ics_data = output_data["calendar"].to_ical()
+
     try:
-        with open(output_data["path"], "w") as f:
-            f.write(str(output_data["calendar"]))
+        with open(output_data["path"], "wb") as f:
+            f.write(ics_data)
         logging.info(
             f"Wrote {len(output_data['calendar'].events)} events to {output_data['path']}"
         )
